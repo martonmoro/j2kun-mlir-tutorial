@@ -12,18 +12,58 @@ namespace mlir
         using arith::AddIOp;
         using arith::ConstantOp;
         using arith::MulIOp;
+        using arith::ShLIOp;
 
         // Replace y = C*x with y = C/2*x + C/2*x, when C is a power of 2, otherwise do
         // nothing.
-        struct PowerOfTwoExpand : public OpRewritePattern<MulIOp>
+        // struct PowerOfTwoExpand : public OpRewritePattern<MulIOp>
+        // {
+        //     PowerOfTwoExpand(mlir::MLIRContext *context)
+        //         : OpRewritePattern<MulIOp>(context, /*benefit=*/2) {}
+
+        //     LogicalResult matchAndRewrite(MulIOp op,
+        //                                   PatternRewriter &rewriter) const override
+        //     {
+        //         Value lhs = op.getOperand(0);
+
+        //         // canonicalization patterns ensure the constant is on the right, if there is a constant
+        //         // See https://mlir.llvm.org/docs/Canonicalization/#globally-applied-rules
+        //         Value rhs = op.getOperand(1);
+        //         auto rhsDefiningOp = rhs.getDefiningOp<arith::ConstantIntOp>();
+        //         if (!rhsDefiningOp)
+        //         {
+        //             return failure();
+        //         }
+
+        //         int64_t value = rhsDefiningOp.value();
+        //         bool is_power_of_two = (value & (value - 1)) == 0;
+
+        //         if (!is_power_of_two)
+        //         {
+        //             return failure();
+        //         }
+
+        //         ConstantOp newConstant = rewriter.create<ConstantOp>(
+        //             rhsDefiningOp.getLoc(), rewriter.getIntegerAttr(rhs.getType(), value / 2));
+        //         MulIOp newMul = rewriter.create<MulIOp>(op.getLoc(), lhs, newConstant);
+        //         AddIOp newAdd = rewriter.create<AddIOp>(op.getLoc(), newMul, newMul);
+
+        //         rewriter.replaceOp(op, newAdd);
+        //         rewriter.eraseOp(rhsDefiningOp);
+
+        //         return success();
+        //     }
+        // };
+
+        struct PowerOfTwoExpandShift : public OpRewritePattern<MulIOp>
         {
-            PowerOfTwoExpand(mlir::MLIRContext *context)
+            PowerOfTwoExpandShift(mlir::MLIRContext *context)
                 : OpRewritePattern<MulIOp>(context, /*benefit=*/2) {}
 
             LogicalResult matchAndRewrite(MulIOp op,
                                           PatternRewriter &rewriter) const override
             {
-                Value lhs = op.getOperand(0);
+                Value lfh = op.getOperand(0);
 
                 // canonicalization patterns ensure the constant is on the right, if there is a constant
                 // See https://mlir.llvm.org/docs/Canonicalization/#globally-applied-rules
@@ -42,12 +82,11 @@ namespace mlir
                     return failure();
                 }
 
+                int64_t shift_amount = llvm::countr_zero(static_cast<uint64_t>(value));
                 ConstantOp newConstant = rewriter.create<ConstantOp>(
-                    rhsDefiningOp.getLoc(), rewriter.getIntegerAttr(rhs.getType(), value / 2));
-                MulIOp newMul = rewriter.create<MulIOp>(op.getLoc(), lhs, newConstant);
-                AddIOp newAdd = rewriter.create<AddIOp>(op.getLoc(), newMul, newMul);
-
-                rewriter.replaceOp(op, newAdd);
+                    rhsDefiningOp.getLoc(), rewriter.getIntegerAttr(rhs.getType(), shift_amount));
+                ShLIOp newShL = rewriter.create<ShLIOp>(op.getLoc(), lfh, newConstant);
+                rewriter.replaceOp(op, newShL);
                 rewriter.eraseOp(rhsDefiningOp);
 
                 return success();
@@ -92,7 +131,8 @@ namespace mlir
         void MulToAddPass::runOnOperation()
         {
             mlir::RewritePatternSet patterns(&getContext());
-            patterns.add<PowerOfTwoExpand>(&getContext());
+            // patterns.add<PowerOfTwoExpand>(&getContext());
+            patterns.add<PowerOfTwoExpandShift>(&getContext());
             patterns.add<PeelFromMul>(&getContext());
             (void)applyPatternsGreedily(getOperation(), std::move(patterns));
         }
